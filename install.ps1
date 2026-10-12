@@ -14,7 +14,9 @@
 # stays open on it. The seat installer itself runs in its own PowerShell process, so its own exit ends only that process.
 $GhVer = '2.102.0'                   # GitHub CLI release used only for the sign-in and the first fetch
 function Invoke-DDSeatBootstrap {
-  $ErrorActionPreference = 'Stop'     # local to this function: the person's own session keeps its own setting
+  # 'Continue', local to this function: on Windows PowerShell 5.1 a native command's error output (gh's) under 'Stop' turns
+  # into a terminating error. The cmdlets that must stop on failure say so with -ErrorAction Stop.
+  $ErrorActionPreference = 'Continue'
   $Org = 'digitaldealer-au'; $Team = 'engineering-playbook'; $Kit = 'operator-kit/seat-installer'
   function Say($m) { Write-Host ''; Write-Host "  $m" }
   function Fail($m, $what) {
@@ -28,9 +30,10 @@ function Invoke-DDSeatBootstrap {
   Remove-Item -LiteralPath $W -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path $W | Out-Null
   Say 'Fetching the GitHub tool (one-off, for the sign-in)...'
-  try { Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/cli/cli/releases/download/v$GhVer/gh_${GhVer}_windows_$arch.zip" -OutFile (Join-Path $W 'gh.zip') }
+  try { Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/cli/cli/releases/download/v$GhVer/gh_${GhVer}_windows_$arch.zip" -OutFile (Join-Path $W 'gh.zip') -ErrorAction Stop }
   catch { Fail 'could not download the GitHub tool.' 'check the internet connection, then run the line again.' }
-  Expand-Archive -LiteralPath (Join-Path $W 'gh.zip') -DestinationPath (Join-Path $W 'gh') -Force
+  try { Expand-Archive -LiteralPath (Join-Path $W 'gh.zip') -DestinationPath (Join-Path $W 'gh') -Force -ErrorAction Stop }
+  catch { Fail 'could not unpack the GitHub tool.' 'run the line again.' }
   $gh = Join-Path $W 'gh\bin\gh.exe'
 
   & $gh auth status *> $null
@@ -50,13 +53,14 @@ function Invoke-DDSeatBootstrap {
   Remove-Item -LiteralPath $Dest -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path (Join-Path $Dest 'assets') | Out-Null
   Say 'Fetching the seat installer from the team repository...'
-  try { $tree = Invoke-RestMethod -UseBasicParsing -Headers $H -Uri "https://api.github.com/repos/$Org/$Team/git/trees/main?recursive=1" }
+  try { $tree = Invoke-RestMethod -UseBasicParsing -Headers $H -Uri "https://api.github.com/repos/$Org/$Team/git/trees/main?recursive=1" -ErrorAction Stop }
   catch { Fail "could not read the team repository as $who." "your GitHub account must be in the $Org organisation (ask Andre), then run the line again." }
   $blobs = @($tree.tree | Where-Object { $_.type -eq 'blob' -and $_.path.StartsWith("$Kit/") })
   if ($blobs.Count -eq 0) { Fail 'the installer was not found in the team repository.' 'ask Andre.' }
   foreach ($b in $blobs) {
     $rel = $b.path.Substring($Kit.Length + 1).Replace('/', '\')
-    Invoke-WebRequest -UseBasicParsing -Headers $H -Uri "https://api.github.com/repos/$Org/$Team/git/blobs/$($b.sha)" -OutFile (Join-Path $Dest $rel)
+    try { Invoke-WebRequest -UseBasicParsing -Headers $H -Uri "https://api.github.com/repos/$Org/$Team/git/blobs/$($b.sha)" -OutFile (Join-Path $Dest $rel) -ErrorAction Stop }
+    catch { Fail "could not fetch $rel from the team repository." 'check the internet connection, then run the line again.' }
   }
   Get-ChildItem -LiteralPath $Dest -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
   if (-not (Test-Path (Join-Path $Dest 'start-here.ps1'))) { Fail "the installer is incomplete ($($blobs.Count) files)." "ask Andre to check $Kit in the team repository." }
@@ -65,7 +69,7 @@ function Invoke-DDSeatBootstrap {
   if ($env:DDSEAT_BOOTSTRAP_ONLY -eq '1') { Write-Host $Dest; return }
   # Its own process, in this same window (nothing captured, so every line and prompt shows): whatever it ends with,
   # this window stays open on its last screen.
-  $p = Start-Process -FilePath 'powershell' -NoNewWindow -Wait -PassThru `
+  $p = Start-Process -FilePath 'powershell' -NoNewWindow -Wait -PassThru -ErrorAction Stop `
        -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $Dest 'start-here.ps1') + '"'))
   $global:DDSeatBootstrapCode = $p.ExitCode
 }
