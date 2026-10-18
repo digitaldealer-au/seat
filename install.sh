@@ -37,7 +37,10 @@ say "Signed in to GitHub as $WHO."
 
 DEST="$HOME/.dd-seat/installer"; rm -rf "$DEST"; mkdir -p "$DEST/assets"
 say "Fetching the seat installer from the team repository..."
-LIST="$("$GH" api "repos/$ORG/$TEAM/git/trees/main?recursive=1" --jq ".tree[] | select(.type==\"blob\" and (.path|startswith(\"$KIT/\"))) | .sha + \" \" + .path" 2>/dev/null)"
+LIST="$("$GH" api "repos/$ORG/$TEAM/git/trees/main?recursive=1" --jq ".tree[] | select(.type==\"blob\" and (.path|startswith(\"$KIT/\"))) | .sha + \" \" + .path" 2>/dev/null)" || LIST=""
+# On a refusal (not yet in the organisation: GitHub answers 404) the tool prints the error body on stdout, so a
+# non-empty answer is not proof. Every line must be "<40-hex sha> <path>"; anything else means "could not read".
+printf '%s\n' "$LIST" | grep -qvE '^[0-9a-f]{40} ' && LIST=""
 [ -n "$LIST" ] || fail "could not read the team repository as $WHO." "your GitHub account must be in the $ORG organisation (ask Andre), then run the line again."
 N=0
 while IFS= read -r line; do
