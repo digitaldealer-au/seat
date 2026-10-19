@@ -1,5 +1,6 @@
 #!/bin/bash
-# Digital Dealer operator seat — the one line for a Mac. Open Terminal, paste it, press Return:
+# Digital Dealer operator seat — the one line for a Mac (Terminal) or Ubuntu inside Windows (the Ubuntu window). Paste it,
+# press Return:
 #
 #   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/digitaldealer-au/seat/main/install.sh)"
 #
@@ -16,15 +17,32 @@ say() { printf '\n  %s\n' "$*"; }
 fail() { printf '\n  Stopped: %s\n  What to do: %s\n\n' "$1" "$2"; exit 2; }
 
 say "Digital Dealer — operator seat"
-case "$(uname -s)" in Darwin) ;; *) fail "this line is for a Mac." "on Windows, open PowerShell and run the Windows line from the manual.";; esac
-case "$(uname -m)" in arm64) ARCH=arm64;; x86_64) ARCH=amd64;; *) fail "unknown processor ($(uname -m))." "ask Andre.";; esac
+# The same line works in Ubuntu inside Windows (WSL), 2026-10-19.
+case "$(uname -s)" in
+  Darwin) KIND=macOS;;
+  Linux)  grep -qsi microsoft /proc/version || fail "this line is for a Mac or Ubuntu inside Windows (WSL)." "ask Andre."
+          KIND=linux;;
+  *) fail "this line is for a Mac." "on Windows, open PowerShell and run the Windows line from the manual.";;
+esac
+case "$(uname -m)" in arm64|aarch64) ARCH=arm64;; x86_64) ARCH=amd64;; *) fail "unknown processor ($(uname -m))." "ask Andre.";; esac
 
 W="$HOME/.dd-seat/bootstrap"; rm -rf "$W"; mkdir -p "$W"
 say "Fetching the GitHub tool (one-off, for the sign-in)..."
-curl -fsSL -o "$W/gh.zip" "https://github.com/cli/cli/releases/download/v$GH_VER/gh_${GH_VER}_macOS_$ARCH.zip" \
-  || fail "could not download the GitHub tool." "check the internet connection, then run the line again."
-unzip -q "$W/gh.zip" -d "$W" || fail "could not unpack the GitHub tool." "run the line again."
-GH="$W/gh_${GH_VER}_macOS_$ARCH/bin/gh"
+if [ "$KIND" = macOS ]; then
+  curl -fsSL -o "$W/gh.zip" "https://github.com/cli/cli/releases/download/v$GH_VER/gh_${GH_VER}_macOS_$ARCH.zip" \
+    || fail "could not download the GitHub tool." "check the internet connection, then run the line again."
+  unzip -q "$W/gh.zip" -d "$W" || fail "could not unpack the GitHub tool." "run the line again."
+else
+  curl -fsSL -o "$W/gh.tgz" "https://github.com/cli/cli/releases/download/v$GH_VER/gh_${GH_VER}_linux_$ARCH.tar.gz" \
+    || fail "could not download the GitHub tool." "check the internet connection, then run the line again."
+  tar -xzf "$W/gh.tgz" -C "$W" || fail "could not unpack the GitHub tool." "run the line again."
+  # the sign-in page opens in the Windows browser (the link travels in a variable, never on a command line)
+  if [ -z "${BROWSER:-}" ] && ! command -v wslview >/dev/null 2>&1; then
+    printf '%s\n' '#!/bin/sh' 'DD_URL="$1" WSLENV="${WSLENV:+$WSLENV:}DD_URL" exec powershell.exe -NoProfile -NonInteractive -Command '"'"'Start-Process $env:DD_URL'"'" > "$W/open"
+    chmod +x "$W/open"; export BROWSER="$W/open"
+  fi
+fi
+GH="$W/gh_${GH_VER}_${KIND}_$ARCH/bin/gh"
 
 if ! "$GH" auth status >/dev/null 2>&1; then
   say "A browser opens: sign in to GitHub as YOURSELF (your own account, with its two-factor sign-in)."
@@ -51,6 +69,8 @@ while IFS= read -r line; do
 done <<< "$LIST"
 chmod +x "$DEST"/*.sh "$DEST"/*.command 2>/dev/null
 [ -f "$DEST/start-here.sh" ] && [ -f "$DEST/dd-ui.sh" ] || fail "the installer is incomplete ($N files)." "ask Andre to check operator-kit/$KIT in the team repository."
+[ "$KIND" = linux ] && [ -f "$DEST/wsl-tools.sh" ] || [ "$KIND" = macOS ] || fail "the installer does not support Ubuntu yet ($N files)." "ask Andre to check operator-kit/$KIT in the team repository."
+[ "${BROWSER:-}" = "$W/open" ] && unset BROWSER   # the installer sets its own lasting one
 rm -rf "$W"
 say "Installer fetched ($N files). Handing over to it."
 [ "${DDSEAT_BOOTSTRAP_ONLY:-}" = "1" ] && { echo "$DEST"; exit 0; }

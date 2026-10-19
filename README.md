@@ -10,6 +10,8 @@ to update your seat.
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/digitaldealer-au/seat/main/install.sh)"
 ```
 
+**Ubuntu inside Windows (WSL)** — open your Ubuntu window and paste the same line as the Mac, then press Return.
+
 **Windows** — open PowerShell (press the Windows key, type PowerShell, press Enter), paste, press Enter:
 
 ```
