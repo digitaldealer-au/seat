@@ -53,9 +53,17 @@ function Invoke-DDSeatBootstrap {
   Remove-Item -LiteralPath $Dest -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path (Join-Path $Dest 'assets') | Out-Null
   Say 'Fetching the seat installer from the team repository...'
-  try { $tree = Invoke-RestMethod -UseBasicParsing -Headers $H -Uri "https://api.github.com/repos/$Org/$Team/git/trees/main?recursive=1" -ErrorAction Stop }
+  # List the kit folder's own tree, never the whole repository's: past ~7 MB GitHub truncates a recursive tree, and the
+  # team repository passed that on 9 Nov 2026, dropping the kit (see install.sh).
+  $HJ = @{ Authorization = "Bearer $tok"; Accept = 'application/vnd.github+json'; 'User-Agent' = 'dd-seat' }
+  $kitParent = $Kit.Substring(0, $Kit.LastIndexOf('/')); $kitName = $Kit.Substring($Kit.LastIndexOf('/') + 1)
+  try { $listing = Invoke-RestMethod -UseBasicParsing -Headers $HJ -Uri "https://api.github.com/repos/$Org/$Team/contents/$($kitParent)?ref=main" -ErrorAction Stop }
   catch { Fail "could not read the team repository as $who." "your GitHub account must be in the $Org organisation (ask Andre), then run the line again." }
-  $blobs = @($tree.tree | Where-Object { $_.type -eq 'blob' -and $_.path.StartsWith("$Kit/") })
+  $kitDir = @($listing | Where-Object { $_.type -eq 'dir' -and $_.name -eq $kitName }) | Select-Object -First 1
+  if (-not $kitDir) { Fail 'the installer was not found in the team repository.' 'ask Andre.' }
+  try { $tree = Invoke-RestMethod -UseBasicParsing -Headers $HJ -Uri "https://api.github.com/repos/$Org/$Team/git/trees/$($kitDir.sha)?recursive=1" -ErrorAction Stop }
+  catch { Fail "could not read the team repository as $who." 'check the internet connection, then run the line again.' }
+  $blobs = @($tree.tree | Where-Object { $_.type -eq 'blob' } | ForEach-Object { [pscustomobject]@{ sha = $_.sha; path = "$Kit/$($_.path)" } })
   if ($blobs.Count -eq 0) { Fail 'the installer was not found in the team repository.' 'ask Andre.' }
   foreach ($b in $blobs) {
     $rel = $b.path.Substring($Kit.Length + 1).Replace('/', '\')
