@@ -55,7 +55,13 @@ say "Signed in to GitHub as $WHO."
 
 DEST="$HOME/.dd-seat/installer"; rm -rf "$DEST"; mkdir -p "$DEST/assets"
 say "Fetching the seat installer from the team repository..."
-LIST="$("$GH" api "repos/$ORG/$TEAM/git/trees/main?recursive=1" --jq ".tree[] | select(.type==\"blob\" and (.path|startswith(\"$KIT/\"))) | .sha + \" \" + .path" 2>/dev/null)" || LIST=""
+# List the kit folder's own tree, never the whole repository's: past ~7 MB GitHub truncates a recursive tree, and the
+# team repository passed that on 9 Nov 2026 (47,000 entries), dropping the kit and stopping every seat with the
+# organisation message below although the account was a member.
+KSHA="$("$GH" api "repos/$ORG/$TEAM/contents/${KIT%/*}?ref=main" --jq ".[] | select(.name==\"${KIT##*/}\" and .type==\"dir\") | .sha" 2>/dev/null)" || KSHA=""
+printf '%s' "$KSHA" | grep -qxE '[0-9a-f]{40}' || KSHA=""
+LIST=""
+[ -n "$KSHA" ] && { LIST="$("$GH" api "repos/$ORG/$TEAM/git/trees/$KSHA?recursive=1" --jq ".tree[] | select(.type==\"blob\") | .sha + \" $KIT/\" + .path" 2>/dev/null)" || LIST=""; }
 # On a refusal (not yet in the organisation: GitHub answers 404) the tool prints the error body on stdout, so a
 # non-empty answer is not proof. Every line must be "<40-hex sha> <path>"; anything else means "could not read".
 printf '%s\n' "$LIST" | grep -qvE '^[0-9a-f]{40} ' && LIST=""
